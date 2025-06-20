@@ -1425,7 +1425,7 @@ importers:
         version: 4.4.1(supports-color@8.1.1)
       dompurify:
         specifier: ^3.2.6
-        version: 3.2.6
+        version: 3.2.5
       express:
         specifier: ^4.21.2
         version: 4.21.2
@@ -7534,9 +7534,6 @@ packages:
 
   dompurify@3.2.5:
     resolution: {integrity: sha512-mLPd29uoRe9HpvwP2TxClGQBzGXeEC/we/q+bFlmPPmj2p2Ugl3r6ATu/UU1v77DXNcehiBg9zsr1dREyA/dJQ==}
-
-  dompurify@3.2.6:
-    resolution: {integrity: sha512-/2GogDQlohXPZe6D6NOgQvXLPSYBqIWMnZ8zzOhn09REE4eyAzb+Hed3jhoM9OkuaJ8P6ZGTTVWQKAi8ieIzfQ==}
 
   domutils@2.8.0:
     resolution: {integrity: sha512-w96Cjofp72M5IIhpjgobBimYEfoPjx1Vx0BSX9P30WBdZW2WIKU0T1Bd0kz2eNZ9ikjKgHbEyKx8BB6H1L3h3A==}
@@ -14462,7 +14459,7 @@ snapshots:
       '@types/lodash.debounce': 4.0.9
       '@types/lodash.throttle': 4.1.9
       clsx: 2.1.1
-      dompurify: 3.2.6
+      dompurify: 3.2.5
       lodash.debounce: 4.0.8
       lodash.throttle: 4.1.1
       nanoid: 5.1.5
@@ -18066,10 +18063,6 @@ snapshots:
   dompurify@3.1.6: {}
 
   dompurify@3.2.5:
-    optionalDependencies:
-      '@types/trusted-types': 2.0.7
-
-  dompurify@3.2.6:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
