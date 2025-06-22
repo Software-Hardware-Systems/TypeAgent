@@ -100,24 +100,24 @@ namespace autoShell
             return appIds;
         }
 
-        static void SetMasterVolume(int pct)
+        static async Task SetMasterVolumeAsync(int pct)
         {
             CoreAudioDevice defaultPlaybackDevice = new CoreAudioController().DefaultPlaybackDevice;
             s_savedVolumePct = defaultPlaybackDevice.Volume;
-            defaultPlaybackDevice.Volume = pct;
+            await defaultPlaybackDevice.SetVolumeAsync(pct);
         }
 
-        static void RestoreMasterVolume()
+        static async Task RestoreMasterVolumeAsync()
         {
             CoreAudioDevice defaultPlaybackDevice = new CoreAudioController().DefaultPlaybackDevice;
-            defaultPlaybackDevice.Volume = s_savedVolumePct;
+            await defaultPlaybackDevice.SetVolumeAsync(s_savedVolumePct);
         }
 
-        static void SetMasterMute(bool mute)
+        static async Task SetMasterMuteAsync(bool mute)
         {
             CoreAudioDevice defaultPlaybackDevice = new CoreAudioController().DefaultPlaybackDevice;
             Debug.WriteLine("Current Mute:" + defaultPlaybackDevice.IsMuted);
-            defaultPlaybackDevice.Mute(mute);
+            await defaultPlaybackDevice.SetMuteAsync(mute);
         }
 
         // import GetWindowRect
@@ -373,7 +373,7 @@ namespace autoShell
             SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, imagePath, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
         }
 
-        static bool execLine(string line)
+        static async Task<bool> execLineAsync(string line)
         {
             var quit = false;
             // parse the line as a json object with one or more command keys (with values as parameters)
@@ -413,17 +413,17 @@ namespace autoShell
                         int pct = 0;
                         if (int.TryParse(value, out pct))
                         {
-                            SetMasterVolume(pct);
+                            await SetMasterVolumeAsync(pct);
                         }
                         break;
                     case "restoreVolume":
-                        RestoreMasterVolume();
+                        await RestoreMasterVolumeAsync();
                         break;
                     case "mute":
                         bool mute = false;
                         if (bool.TryParse(value, out mute))
                         {
-                            SetMasterMute(mute);
+                            await SetMasterMuteAsync(mute);
                         }
                         break;
                     case "listAppNames":
@@ -440,14 +440,14 @@ namespace autoShell
             }
             return quit;
         }
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             bool quit = false;
             while (!quit)
             {
                 // read a line from the console
                 string line = Console.ReadLine();
-                quit = execLine(line);
+                quit = await execLineAsync(line);
             }
         }
     }
