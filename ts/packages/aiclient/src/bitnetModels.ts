@@ -60,6 +60,7 @@ import {
     readResponseStream,
 } from "./restClient.js";
 import { TokenCounter } from "./tokenCounter.js";
+import { OpenAIApiSettings } from "./openaiSettings.js";
 
 export type BitNetApiSettings = CommonApiSettings & {
     provider: "bitnet";
@@ -77,33 +78,42 @@ function getBitNetEndpointUrl(env: Record<string, string | undefined>) {
     );
 }
 
-// ToDo: Implement model listing for BitNet if supported
-// type BitNetTagResult = {
-//     models: {
-//         name: string;
-//         modified_at: string;
-//         size: number;
-//         digest: string;
-//         details: {
-//             format: string;
-//             family: string;
-//             families: string[];
-//             parameter_size: string;
-//             quantization_level: string;
-//         };
-//     }[];
-// };
+type BitNetTagResult = {
+    models: {
+        name: string;
+        modified_at: string;
+        size: number;
+        digest: string;
+        details: {
+            format: string;
+            family: string;
+            families: string[];
+            parameter_size: string;
+            quantization_level: string;
+        };
+    }[];
+};
 
 let modelNames: string[] | undefined;
 export async function getBitNetModelNames(
     env: Record<string, string | undefined> = process.env,
 ): Promise<string[]> {
-    // BitNet server may not support model listing; fallback to env/config
     if (modelNames === undefined) {
-        const modelName = getEnvSetting(env, "BITNET_MODEL", undefined, "bitnet_b1_58-3B");
-        modelNames = [
-            `bitnet:${modelName}`,
-        ];
+        const url = `${getBitNetEndpointUrl(env).replace(/\/$/, "")}/props`;
+        const result = await callJsonApi({}, url, undefined);
+        if (result.success) {
+            const tags = result.data as BitNetTagResult;
+            modelNames = tags.models.map(
+                (m) =>
+                    `bitnet:${
+                        m.name.endsWith(":latest")
+                            ? m.name.substring(0, m.name.length - 7)
+                            : m.name
+                    }`,
+            );
+        } else {
+            modelNames = [];
+        }
     }
     return modelNames;
 }
@@ -112,17 +122,35 @@ export function bitnetApiSettingsFromEnv(
     modelType: ModelType,
     env: Record<string, string | undefined> = process.env,
     modelName: string = "bitnet_b1_58-3B",
-): BitNetApiSettings {
+): BitNetApiSettings | OpenAIApiSettings {
+    const useOAIEndpoint = env["BITNET_USE_OAI_ENDPOINT"] !== "0";
     if (modelType === ModelType.Image) {
         throw new Error("Image model not supported");
     }
     const url = getBitNetEndpointUrl(env);
-    return {
-        provider: "bitnet",
-        modelType,
-        endpoint: `${url}/completion`,
-        modelName,
-    };
+    if (useOAIEndpoint) {
+        return {
+            provider: "openai",
+            modelType,
+            endpoint:
+                modelType === ModelType.Chat
+                    ? `${url}/v1/chat/completions`
+                    : `${url}/v1/embeddings`,
+            modelName,
+            apiKey: "",
+            supportsResponseFormat: true, // REVIEW: just assume it supports it. Does BitNet reject this option?
+        };
+    } else {       
+        return {
+            provider: "bitnet",
+            modelType,
+            endpoint:
+                useOAIEndpoint
+                    ? `${url}/v1/chat/completions`
+                    : `${url}/completion`,
+            modelName,
+        };
+    }
 }
 
 type BitNetChatCompletionUsage = {
@@ -202,11 +230,11 @@ export function createBitNetChatModel(
             typeof prompt === "string"
                 ? [{ role: "user", content: prompt }]
                 : prompt;
-        const isImageProptContent = (c: MultimodalPromptContent) =>
+        const isImagePromptContent = (c: MultimodalPromptContent) =>
             (c as ImagePromptContent).type == "image_url";
         messages.map((ps) => {
             if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImageProptContent)) {
+                if (ps.content.some(isImagePromptContent)) {
                     throw new Error("Image content not supported");
                 }
             }
@@ -249,11 +277,11 @@ export function createBitNetChatModel(
                 ? [{ role: "user", content: prompt }]
                 : prompt;
 
-        const isImageProptContent = (c: MultimodalPromptContent) =>
+        const isImagePromptContent = (c: MultimodalPromptContent) =>
             (c as ImagePromptContent).type == "image_url";
         messages.map((ps) => {
             if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImageProptContent)) {
+                if (ps.content.some(isImagePromptContent)) {
                     throw new Error("Image content not supported");
                 }
             }

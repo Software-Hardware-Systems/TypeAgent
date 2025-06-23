@@ -192,11 +192,11 @@ export function createOllamaChatModel(
             typeof prompt === "string"
                 ? [{ role: "user", content: prompt }]
                 : prompt;
-        const isImageProptContent = (c: MultimodalPromptContent) =>
+        const isImagePromptContent = (c: MultimodalPromptContent) =>
             (c as ImagePromptContent).type == "image_url";
         messages.map((ps) => {
             if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImageProptContent)) {
+                if (ps.content.some(isImagePromptContent)) {
                     throw new Error("Image content not supported");
                 }
             }
@@ -239,11 +239,11 @@ export function createOllamaChatModel(
                 ? [{ role: "user", content: prompt }]
                 : prompt;
 
-        const isImageProptContent = (c: MultimodalPromptContent) =>
+        const isImagePromptContent = (c: MultimodalPromptContent) =>
             (c as ImagePromptContent).type == "image_url";
         messages.map((ps) => {
             if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImageProptContent)) {
+                if (ps.content.some(isImagePromptContent)) {
                     throw new Error("Image content not supported");
                 }
             }

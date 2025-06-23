@@ -588,11 +588,11 @@ function createAzureOpenAIChatModel(
         // image_url content with streaming token usage reporting is currently broken
         // TODO: remove after API endpoint correctly handles this case
         let historyIncludesImages: boolean = false;
-        let isImageProptContent = (c: MultimodalPromptContent) =>
+        let isImagePromptContent = (c: MultimodalPromptContent) =>
             (c as ImagePromptContent).type == "image_url";
         messages.map((ps) => {
             if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImageProptContent)) {
+                if (ps.content.some(isImagePromptContent)) {
                     historyIncludesImages = true;
                 }
             }
