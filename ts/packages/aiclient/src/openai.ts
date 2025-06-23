@@ -33,6 +33,11 @@ import {
     ollamaApiSettingsFromEnv,
 } from "./ollamaModels.js";
 import {
+    createBitNetChatModel,
+    BitNetApiSettings,
+    bitnetApiSettingsFromEnv,
+} from "./bitnetModels.js";
+import {
     OpenAIApiSettings,
     openAIApiSettingsFromEnv,
 } from "./openaiSettings.js";
@@ -55,7 +60,7 @@ export type ModelInfo<T> = {
     maxTokens: number;
 };
 
-export type ModelProviders = "openai" | "azure" | "ollama";
+export type ModelProviders = "openai" | "azure" | "ollama" | "bitnet";
 
 export type CommonApiSettings = {
     provider: ModelProviders;
@@ -72,6 +77,7 @@ export type CommonApiSettings = {
  */
 export type ApiSettings =
     | OllamaApiSettings
+    | BitNetApiSettings
     | AzureApiSettings
     | OpenAIApiSettings;
 
@@ -101,6 +107,7 @@ export enum EnvVars {
     AZURE_OPENAI_API_KEY_DALLE = "AZURE_OPENAI_API_KEY_DALLE",
     AZURE_OPENAI_ENDPOINT_DALLE = "AZURE_OPENAI_ENDPOINT_DALLE",
 
+    BITNET_ENDPOINT = "BITNET_ENDPOINT",
     OLLAMA_ENDPOINT = "OLLAMA_ENDPOINT",
 
     AZURE_MAPS_ENDPOINT = "AZURE_MAPS_ENDPOINT",
@@ -212,12 +219,16 @@ function parseEndPointName(endpoint?: string): {
     if (
         endpoint === "openai" ||
         endpoint === "azure" ||
+        endpoint === "bitnet" ||
         endpoint === "ollama"
     ) {
         return { provider: endpoint };
     }
     if (endpoint.startsWith("openai:")) {
         return { provider: "openai", name: endpoint.substring(7) };
+    }
+    if (endpoint.startsWith("bitnet:")) {
+        return { provider: "bitnet", name: endpoint.substring(7) };
     }
     if (endpoint.startsWith("ollama:")) {
         return { provider: "ollama", name: endpoint.substring(7) };
@@ -245,8 +256,10 @@ export function getChatModelSettings(endpoint?: string) {
         endpointName.provider === "openai"
             ? openAIApiSettingsFromEnv
             : endpointName.provider === "azure"
-              ? azureApiSettingsFromEnv
-              : ollamaApiSettingsFromEnv;
+                ? azureApiSettingsFromEnv
+                : endpointName.provider === "bitnet"
+                    ? bitnetApiSettingsFromEnv
+                    : ollamaApiSettingsFromEnv
     const settings = getApiSettingsFromEnv(
         ModelType.Chat,
         undefined,
@@ -389,6 +402,14 @@ export function createChatModel(
             ? endpoint
             : getChatModelSettings(endpoint);
 
+    if (settings.provider === "bitnet") {
+        return createBitNetChatModel(
+            settings,
+            completionSettings,
+            completionCallback,
+            tags,
+        );
+    }
     if (settings.provider === "ollama") {
         return createOllamaChatModel(
             settings,

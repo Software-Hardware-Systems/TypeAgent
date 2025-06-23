@@ -3,6 +3,7 @@
 
 import { openai as ai } from "aiclient";
 import { getOllamaModelNames } from "./ollamaModels.js";
+import { getBitNetModelNames } from "./bitnetModels.js";
 
 export function getChatModelMaxConcurrency(
     userMaxConcurrency?: number,
@@ -42,8 +43,9 @@ export async function getChatModelNames() {
     const openaiNames = getPrefixedNames(ai.EnvVars.OPENAI_API_KEY).map(
         (key) => `openai:${key}`,
     );
-
-    return [...azureNames, ...openaiNames, ...(await getOllamaModelNames())];
+    const ollamaNames = await getOllamaModelNames();
+    const bitnetNames = await getBitNetModelNames();
+    return [...azureNames, ...openaiNames, ...ollamaNames, ...bitnetNames];
 }
 
 export function isMultiModalContentSupported(modelName: string | undefined) {
