@@ -56,7 +56,7 @@ import {
 import {
     callApi,
     callJsonApi,
-    // getJson,
+    getJson,
     readResponseStream,
 } from "./restClient.js";
 import { TokenCounter } from "./tokenCounter.js";
@@ -78,21 +78,21 @@ function getBitNetEndpointUrl(env: Record<string, string | undefined>) {
     );
 }
 
-type BitNetTagResult = {
-    models: {
-        name: string;
-        modified_at: string;
-        size: number;
-        digest: string;
-        details: {
-            format: string;
-            family: string;
-            families: string[];
-            parameter_size: string;
-            quantization_level: string;
-        };
-    }[];
-};
+// type BitNetTagResult = {
+//     models: {
+//         name: string;
+//         modified_at: string;
+//         size: number;
+//         digest: string;
+//         details: {
+//             format: string;
+//             family: string;
+//             families: string[];
+//             parameter_size: string;
+//             quantization_level: string;
+//         };
+//     }[];
+// };
 
 let modelNames: string[] | undefined;
 export async function getBitNetModelNames(
@@ -100,17 +100,19 @@ export async function getBitNetModelNames(
 ): Promise<string[]> {
     if (modelNames === undefined) {
         const url = `${getBitNetEndpointUrl(env).replace(/\/$/, "")}/props`;
-        const result = await callJsonApi({}, url, undefined);
+        const result = await getJson({}, url, undefined);
         if (result.success) {
-            const tags = result.data as BitNetTagResult;
-            modelNames = tags.models.map(
-                (m) =>
-                    `bitnet:${
-                        m.name.endsWith(":latest")
-                            ? m.name.substring(0, m.name.length - 7)
-                            : m.name
-                    }`,
-            );
+            // Extract model name from default_generation_settings.model
+            const data = result.data as any;
+            const modelPath = data?.default_generation_settings?.model;
+            if (typeof modelPath === "string") {
+                // Extract just the model directory name (e.g., "BitNet-b1.58-2B-4T")
+                const match = modelPath.match(/models\/([^/]+)/);
+                const modelName = match ? match[1] : modelPath;
+                modelNames = [`bitnet:${modelName}`];
+            } else {
+                modelNames = [];
+            }
         } else {
             modelNames = [];
         }
