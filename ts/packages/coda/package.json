@@ -67,7 +67,7 @@
     "@vscode/test-cli": "^0.0.8",
     "@vscode/test-electron": "^2.3.9",
     "@vscode/vsce": "^3.2.1",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.25.5",
     "mkdirp": "^3.0.1",
     "prettier": "^3.5.3",
     "rimraf": "^6.0.1"
