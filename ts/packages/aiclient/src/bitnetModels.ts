@@ -146,10 +146,7 @@ export function bitnetApiSettingsFromEnv(
         return {
             provider: "bitnet",
             modelType,
-            endpoint:
-                useOAIEndpoint
-                    ? `${url}/v1/chat/completions`
-                    : `${url}/completion`,
+            endpoint: `${url}/completion`,
             modelName,
         };
     }
