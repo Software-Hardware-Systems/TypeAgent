@@ -74,7 +74,7 @@ function getBitNetEndpointUrl(env: Record<string, string | undefined>) {
         env,
         EnvVars.BITNET_ENDPOINT,
         undefined,
-        "http://localhost:8080",
+        "http://localhost:5005",
     );
 }
 
@@ -163,29 +163,27 @@ type BitNetChatCompletionUsage = {
 
 
 type BitNetChatCompletion = {
-    model: string;
-    created_at: string;
-    message: {
-        role: "assistant";
-        content: string;
-    };
-    done: true;
+    content: string;
+    stop: boolean;
+    id_slot: number;
+    multimodal: boolean;
+    index: number;
 } & BitNetChatCompletionUsage;
 
 type BitNetChatCompletionChunk =
     | {
-          model: string;
-          created_at: string;
-          done: false;
-          message: {
-              role: "assistant";
-              content: string;
-          };
+          content: string;
+          stop: false;
+          id_slot: number;
+          multimodal: boolean;
+          index: number;
       }
     | ({
-          model: string;
-          created_at: string;
-          done: true;
+          content: string;
+          stop: true;
+          id_slot: number;
+          multimodal: boolean;
+          index: number;
       } & BitNetChatCompletionUsage);
 
 export function createBitNetChatModel(
@@ -225,25 +223,44 @@ export function createBitNetChatModel(
     async function complete(
         prompt: string | PromptSection[],
     ): Promise<Result<string>> {
-        const messages =
-            typeof prompt === "string"
-                ? [{ role: "user", content: prompt }]
-                : prompt;
-        const isImagePromptContent = (c: MultimodalPromptContent) =>
-            (c as ImagePromptContent).type == "image_url";
-        messages.map((ps) => {
-            if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImagePromptContent)) {
-                    throw new Error("Image content not supported");
-                }
+        let params: any;
+        if (settings.provider === "bitnet") {
+            // Convert prompt to string for llama.cpp/BitNet
+            let promptStr: string;
+            if (typeof prompt === "string") {
+                promptStr = prompt;
+            } else {
+                // Concatenate all prompt sections as plain text
+                promptStr = prompt.map(ps => typeof ps.content === "string" ? ps.content : (Array.isArray(ps.content) ? ps.content.map(c => typeof c === "string" ? c : JSON.stringify(c)).join(" ") : "")).join("\n");
             }
-        });
-        const params = {
-            ...defaultParams,
-            messages: messages,
-            stream: false,
-            options: completionSettings,
-        };
+            params = {
+                ...defaultParams,
+                prompt: promptStr,
+                stream: false,
+                options: completionSettings,
+            };
+        } else {
+            // OpenAI-style
+            const messages =
+                typeof prompt === "string"
+                    ? [{ role: "user", content: prompt }]
+                    : prompt;
+            const isImagePromptContent = (c: MultimodalPromptContent) =>
+                (c as ImagePromptContent).type == "image_url";
+            messages.map((ps) => {
+                if (Array.isArray(ps.content)) {
+                    if (ps.content.some(isImagePromptContent)) {
+                        throw new Error("Image content not supported");
+                    }
+                }
+            });
+            params = {
+                ...defaultParams,
+                messages: messages,
+                stream: false,
+                options: completionSettings,
+            };
+        }
 
         const result = await callJsonApi(
             {},
@@ -265,33 +282,52 @@ export function createBitNetChatModel(
 
         reportUsage(data);
 
-        return success(data.message.content as string);
+        return success(data.content as string);
     }
 
     async function completeStream(
         prompt: string | PromptSection[],
     ): Promise<Result<AsyncIterableIterator<string>>> {
-        const messages: PromptSection[] =
-            typeof prompt === "string"
-                ? [{ role: "user", content: prompt }]
-                : prompt;
-
-        const isImagePromptContent = (c: MultimodalPromptContent) =>
-            (c as ImagePromptContent).type == "image_url";
-        messages.map((ps) => {
-            if (Array.isArray(ps.content)) {
-                if (ps.content.some(isImagePromptContent)) {
-                    throw new Error("Image content not supported");
-                }
+        /**
+         * Handles SSE (Server-Sent Events) streaming responses from the BitNet server.
+         * Each 'data:' line contains a JSON object matching BitNetChatCompletionChunk.
+         * Yields data.content for each chunk, and stops on data.stop.
+         */
+        let params: any;
+        if (settings.provider === "bitnet") {
+            let promptStr: string;
+            if (typeof prompt === "string") {
+                promptStr = prompt;
+            } else {
+                promptStr = prompt.map(ps => typeof ps.content === "string" ? ps.content : (Array.isArray(ps.content) ? ps.content.map(c => typeof c === "string" ? c : JSON.stringify(c)).join(" ") : "")).join("\n");
             }
-        });
-
-        const params = {
-            ...defaultParams,
-            messages: messages,
-            stream: true,
-            ...completionSettings,
-        };
+            params = {
+                ...defaultParams,
+                prompt: promptStr,
+                stream: true,
+                ...completionSettings,
+            };
+        } else {
+            const messages: PromptSection[] =
+                typeof prompt === "string"
+                    ? [{ role: "user", content: prompt }]
+                    : prompt;
+            const isImagePromptContent = (c: MultimodalPromptContent) =>
+                (c as ImagePromptContent).type == "image_url";
+            messages.map((ps) => {
+                if (Array.isArray(ps.content)) {
+                    if (ps.content.some(isImagePromptContent)) {
+                        throw new Error("Image content not supported");
+                    }
+                }
+            });
+            params = {
+                ...defaultParams,
+                messages: messages,
+                stream: true,
+                ...completionSettings,
+            };
+        }
         const result = await callApi(
             {},
             settings.endpoint,
@@ -307,12 +343,37 @@ export function createBitNetChatModel(
             data: (async function* () {
                 const messageStream = readResponseStream(result.data);
                 for await (const message of messageStream) {
-                    const data: BitNetChatCompletionChunk = JSON.parse(message);
-                    if (data.done) {
-                        reportUsage(data);
-                        break;
+                    // Process each line in the message
+                    const lines = message.split("\n");
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed) continue;
+                        if (!trimmed.startsWith("data:")) {
+                            console.debug("[BitNet] Encountered line not starting with 'data:':", trimmed);
+                            //continue;
+                        }
+                        const jsonStr = trimmed.slice(5).trim();
+                        if (!jsonStr) {
+                            console.debug("[BitNet] Encountered empty 'data:' line:", trimmed);
+                            //continue;
+                        }
+                        try {
+                            const data: BitNetChatCompletionChunk = JSON.parse(jsonStr);
+                            if (typeof data.content === "string") {
+                                yield data.content;
+                            }
+                            if (data.stop === true) {
+                                if (typeof reportUsage === "function" && data.eval_count !== undefined && data.prompt_eval_count !== undefined) {
+                                    reportUsage(data as any);
+                                }
+                                return;
+                            }
+                        } catch (err) {
+                            console.debug("[BitNet] Ignored malformed JSON line:", jsonStr, err);
+                            // Yielding error message instead of continuing
+                            yield `${err instanceof Error ? err.message : String(err)}: ${jsonStr}`;
+                        }
                     }
-                    yield data.message.content;
                 }
             })(),
         };
