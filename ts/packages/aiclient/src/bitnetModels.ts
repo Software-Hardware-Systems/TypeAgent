@@ -341,40 +341,114 @@ export function createBitNetChatModel(
         return {
             success: true,
             data: (async function* () {
+                let lastContentTimestamp = Date.now();
                 const messageStream = readResponseStream(result.data);
+                console.debug("[BitNet] Streaming response started", messageStream);
+                
+                // Track content state
+                let contentAccumulated = "";
+                let emptyMessageCount = 0;
+                const MAX_EMPTY_MESSAGES = 5;
+                const CONTENT_TIMEOUT_MS = 2000; // 2 seconds
+                
+                // Completion marker detection
+                const COMPLETION_MARKERS = ["###", "```"];  // Common completion markers
+                let pendingContent = "";
+                
                 for await (const message of messageStream) {
                     // Process each line in the message
                     const lines = message.split("\n");
+                    let hasContent = false;
+                    
                     for (const line of lines) {
                         const trimmed = line.trim();
                         if (!trimmed) continue;
                         if (!trimmed.startsWith("data:")) {
-                            console.debug("[BitNet] Encountered line not starting with 'data:':", trimmed);
-                            //continue;
+                            continue;
                         }
+                        
                         const jsonStr = trimmed.slice(5).trim();
-                        if (!jsonStr) {
-                            console.debug("[BitNet] Encountered empty 'data:' line:", trimmed);
-                            //continue;
-                        }
+                        if (!jsonStr) continue;
+                        
                         try {
                             const data: BitNetChatCompletionChunk = JSON.parse(jsonStr);
-                            if (typeof data.content === "string") {
-                                yield data.content;
-                            }
+                            
+                            // Check for explicit stop signal from server
                             if (data.stop === true) {
-                                if (typeof reportUsage === "function" && data.eval_count !== undefined && data.prompt_eval_count !== undefined) {
-                                    reportUsage(data as any);
+                                if (typeof reportUsage === "function" && 
+                                    data.eval_count !== undefined && 
+                                    data.prompt_eval_count !== undefined) {
+                                    try {
+                                        reportUsage(data as any);
+                                    } catch (err) {
+                                        console.error("[BitNet] Error reporting usage:", err);
+                                    }
                                 }
+                                console.debug("[BitNet] Received explicit stop signal");
                                 return;
                             }
+                            
+                            // Only yield if we have content and it's not a completion marker
+                            if (typeof data.content === "string" && data.content.length > 0) {
+                                // Check if this chunk contains any of our completion markers
+                                const isCompletionMarker = COMPLETION_MARKERS.some(marker => {
+                                    // Check full content with what's pending
+                                    const fullContent = pendingContent + data.content;
+                                    // Look for marker followed by newlines at the end
+                                    return fullContent.endsWith(marker) || 
+                                           fullContent.endsWith(marker + "\n") ||
+                                           fullContent.endsWith(marker + "\n\n");
+                                });
+                                
+                                if (isCompletionMarker) {
+                                    console.debug("[BitNet] Detected completion marker, not yielding:", data.content);
+                                    
+                                    // If we've accumulated substantial content before this marker,
+                                    // consider this the end of the response
+                                    if (contentAccumulated.length > 10) {
+                                        console.debug("[BitNet] Terminating stream after completion marker");
+                                        return;
+                                    }
+                                } else {
+                                    // Add to pending content to check for markers that span chunks
+                                    pendingContent += data.content;
+                                    if (pendingContent.length > 20) {
+                                        pendingContent = pendingContent.slice(-20); // Keep last 20 chars
+                                    }
+                                    
+                                    // Yield the content
+                                    yield data.content;
+                                    contentAccumulated += data.content;
+                                    lastContentTimestamp = Date.now();
+                                    hasContent = true;
+                                    emptyMessageCount = 0; // Reset counter when we get content
+                                }
+                            }
                         } catch (err) {
-                            console.debug("[BitNet] Ignored malformed JSON line:", jsonStr, err);
-                            // Yielding error message instead of continuing
-                            yield `${err instanceof Error ? err.message : String(err)}: ${jsonStr}`;
+                            console.debug("[BitNet] Ignored malformed JSON line:", jsonStr);
+                        }
+                    }
+                    
+                    // Count empty messages or check for logical completion
+                    if (!hasContent) {
+                        emptyMessageCount++;
+                        
+                        // Terminate if we've seen enough empty messages
+                        if (emptyMessageCount >= MAX_EMPTY_MESSAGES) {
+                            console.debug(`[BitNet] ${MAX_EMPTY_MESSAGES} consecutive empty messages, terminating stream`);
+                            break;
+                        }
+                        
+                        // Terminate if we haven't received content for a while and we have some accumulated content
+                        if (contentAccumulated.length > 0 && 
+                            Date.now() - lastContentTimestamp > CONTENT_TIMEOUT_MS) {
+                            console.debug(`[BitNet] No new content for ${CONTENT_TIMEOUT_MS}ms with existing content, terminating stream`);
+                            break;
                         }
                     }
                 }
+                
+                console.debug("[BitNet] Stream complete");
             })(),
         };
     }
