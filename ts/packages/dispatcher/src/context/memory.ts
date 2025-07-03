@@ -8,15 +8,36 @@ import {
     createConversationMemory,
 } from "conversation-memory";
 
-import type { CommandHandlerContext } from "./commandHandlerContext.js";
+import {
+    changeContextConfig,
+    type CommandHandlerContext,
+} from "./commandHandlerContext.js";
 import type {
+    ActionContext,
     ActionResult,
     ActionResultActivityContext,
     Entity,
+    ParsedCommandParams,
 } from "@typeagent/agent-sdk";
 import { ExecutableAction, getFullActionName } from "agent-cache";
 import { CachedImageWithDetails } from "common-utils";
 import { getAppAgentName } from "../internal.js";
+import {
+    CommandHandler,
+    CommandHandlerTable,
+} from "@typeagent/agent-sdk/helpers/command";
+import { getToggleHandlerTable } from "../command/handlerUtils.js";
+import registerDebug from "debug";
+import {
+    displayError,
+    displayResult,
+} from "@typeagent/agent-sdk/helpers/display";
+import {
+    createStyledOutput,
+    writeConversationSearchResult,
+} from "./memoryPrinter.js";
+
+const debug = registerDebug("typeagent:dispatcher:memory");
 
 export async function initializeMemory(
     context: CommandHandlerContext,
@@ -174,4 +195,149 @@ export function addActionResultToMemory(
             result.activityContext,
         );
     }
+}
+
+export async function lookupAndAnswerFromMemory(
+    context: ActionContext<CommandHandlerContext>,
+    question: string,
+): Promise<string[]> {
+    const systemContext = context.sessionContext.agentContext;
+    const conversationMemory = systemContext.conversationMemory;
+    if (conversationMemory === undefined) {
+        throw new Error("Conversation memory is undefined!");
+    }
+
+    const result = await conversationMemory.getAnswerFromLanguage(question);
+    if (!result.success) {
+        throw new Error(`Conversation memory search failed: ${result.message}`);
+    }
+
+    const literalText: string[] = [];
+    for (const [searchResult, answer] of result.data) {
+        debug("Conversation memory search result:", searchResult);
+        if (answer.type === "Answered") {
+            literalText.push(answer.answer!);
+            displayResult(answer.answer!, context);
+        } else {
+            literalText.push(answer.whyNoAnswer!);
+            displayError(answer.whyNoAnswer!, context);
+        }
+    }
+    // TODO: how about entities?
+    return literalText;
+}
+
+function ensureMemory(context: ActionContext<CommandHandlerContext>) {
+    const systemContext = context.sessionContext.agentContext;
+    if (systemContext.session.getConfig().execution.memory.legacy) {
+        throw new Error("Legacy memory is enabled. Command not supported.");
+    }
+
+    const memory = systemContext.conversationMemory;
+    if (memory === undefined) {
+        throw new Error("Conversation memory is not initialized.");
+    }
+    return memory;
+}
+
+class MemoryAnswerCommandHandler implements CommandHandler {
+    public readonly description = "Answer a question using conversation memory";
+    public readonly parameters = {
+        args: {
+            question: {
+                description: "Question to ask the conversation memory",
+                implicitQuotes: true,
+            },
+        },
+        flags: {
+            asc: {
+                description: "Sort results in ascending order",
+                default: true,
+            },
+            message: {
+                description: "Display message",
+                default: false,
+            },
+            knowledge: {
+                description: "Display knowledge",
+                default: false,
+            },
+            count: {
+                description: "Display count of results",
+                default: 25,
+            },
+            distinct: {
+                description: "Display distinct results",
+                default: false,
+            },
+        },
+    } as const;
+    public async run(
+        context: ActionContext<CommandHandlerContext>,
+        params: ParsedCommandParams<typeof this.parameters>,
+    ) {
+        const { args, flags } = params;
+        const memory = ensureMemory(context);
+
+        const result = await memory.getAnswerFromLanguage(args.question);
+        if (!result.success) {
+            throw new Error(
+                `Conversation memory search failed: ${result.message}`,
+            );
+        }
+
+        for (const [searchResult, answer] of result.data) {
+            if (searchResult.rawSearchQuery) {
+                displayResult(
+                    `Raw search query: ${searchResult.rawSearchQuery}`,
+                    context,
+                );
+            }
+
+            const out = createStyledOutput(
+                context.actionIO.appendDisplay.bind(context.actionIO),
+            );
+
+            writeConversationSearchResult(
+                out,
+                memory,
+                searchResult,
+                flags.knowledge,
+                flags.message,
+                {
+                    maxToDisplay: flags.count,
+                    sortAsc: flags.asc,
+                    distinct: flags.distinct,
+                },
+            );
+
+            if (answer.type === "Answered") {
+                displayResult(`Answer: ${answer.answer!}`, context);
+            } else {
+                displayError(`No answer: ${answer.whyNoAnswer!}`, context);
+            }
+        }
+    }
+}
+
+export function getMemoryCommandHandlers(): CommandHandlerTable {
+    return {
+        description: "Memory commands",
+        commands: {
+            legacy: getToggleHandlerTable("legacy", async (context, enable) => {
+                await changeContextConfig(
+                    {
+                        execution: {
+                            memory: {
+                                legacy: enable,
+                            },
+                        },
+                    },
+                    context,
+                );
+            }),
+
+            answer: new MemoryAnswerCommandHandler(),
+        },
+    };
 }

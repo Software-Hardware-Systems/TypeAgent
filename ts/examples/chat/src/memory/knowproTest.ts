@@ -2,25 +2,30 @@
 // Licensed under the MIT License.
 
 import {
+    arg,
     argBool,
     argNum,
     CommandHandler,
     CommandMetadata,
     parseNamedArguments,
+    parseTypedArguments,
 } from "interactive-app";
 import { KnowproContext } from "./knowproMemory.js";
 import { argDestFile, argSourceFile } from "../common.js";
 import * as kp from "knowpro";
 import * as kpTest from "knowpro-test";
+import * as cm from "conversation-memory";
 import {
     changeFileExt,
     getAbsolutePath,
+    htmlToMd,
     readAllText,
     simplifyHtml,
     simplifyText,
 } from "typeagent";
 import chalk from "chalk";
 import { openai } from "aiclient";
+import * as fs from "fs";
 
 /**
  * Test related commands
@@ -37,16 +42,72 @@ export async function createKnowproTestCommands(
     commands.kpTestVerifyAnswerBatch = verifyAnswerBatch;
     commands.kpTestHtml = testHtml;
     commands.kpTestHtmlText = testHtmlText;
+    commands.kpTestHtmlMd = testHtmlMd;
+    commands.kpTestHtmlParts = testHtmlParts;
+    commands.kpTestChoices = testMultipleChoice;
 
     async function testHtml(args: string[]) {
         const html = await readAllText(args[0]);
         const simpleHtml = simplifyHtml(html);
         context.printer.writeLine(simpleHtml);
     }
+
     async function testHtmlText(args: string[]) {
         const html = await readAllText(args[0]);
         const text = simplifyText(html);
         context.printer.writeLine(text);
+    }
+
+    function testHtmlMdDef(): CommandMetadata {
+        return {
+            description: "Html to MD",
+            args: {
+                filePath: arg("File path"),
+            },
+            options: {
+                rootTag: arg("Root tag", "body"),
+            },
+        };
+    }
+    commands.kpTestHtmlMd.metadata = testHtmlMdDef();
+    async function testHtmlMd(args: string[]) {
+        const namedArgs = parseNamedArguments(args, testHtmlMdDef());
+        const filePath = namedArgs.filePath;
+        if (!filePath) {
+            return;
+        }
+        let html = await readAllText(filePath);
+        let md = htmlToMd(html, namedArgs.rootTag);
+        context.printer.writeLine(md);
+
+        const destPath = changeFileExt(filePath, ".md");
+        fs.writeFileSync(destPath, md);
+    }
+
+    function testHtmlPartsDef(): CommandMetadata {
+        return {
+            description: "Html to to DocParts",
+            args: {
+                filePath: arg("File path"),
+            },
+            options: {
+                rootTag: arg("Root tag", "body"),
+            },
+        };
+    }
+    commands.kpTestHtmlParts.metadata = testHtmlPartsDef();
+    async function testHtmlParts(args: string[]) {
+        const namedArgs = parseNamedArguments(args, testHtmlPartsDef());
+        const filePath = namedArgs.filePath;
+        if (!filePath) {
+            return;
+        }
+        let html = await readAllText(filePath);
+        let parts = cm.docPartsFromHtmlEx(html, namedArgs.rootTag);
+        for (const part of parts) {
+            context.printer.writeLine("----------------");
+            context.printer.writeDocPart(part);
+        }
     }
 
     function searchBatchDef(): CommandMetadata {
@@ -274,6 +335,57 @@ export async function createKnowproTestCommands(
                 conversation.secondaryIndexes = undefined;
             }
             context.conversation = conversation;
+        }
+    }
+
+    async function testMultipleChoice(args: string[]) {
+        const namedArgs = parseNamedArguments(
+            args,
+            kpTest.getAnswerRequestDef(),
+        );
+        if (!namedArgs.choices) {
+            context.printer.writeError("No choices provided");
+            return;
+        }
+        const choices: string[] = namedArgs.choices?.split(";");
+        if (!choices || choices.length === 0) {
+            context.printer.writeError("No choices provided");
+            return;
+        }
+
+        const searchResponse = await kpTest.execSearchRequest(
+            context,
+            namedArgs,
+        );
+        const searchResults = searchResponse.searchResults;
+        if (!searchResults.success) {
+            context.printer.writeError(searchResults.message);
+            return;
+        }
+        const getAnswerRequest = parseTypedArguments<kpTest.GetAnswerRequest>(
+            args,
+            kpTest.getAnswerRequestDef(),
+        );
+        let response = await kp.generateMultipleChoiceAnswer(
+            context.conversation!,
+            context.answerGenerator,
+            getAnswerRequest.query,
+            choices,
+            searchResults.data,
+        );
+        if (!response.success) {
+            context.printer.writeError(response.message);
+            response = await kp.generateAnswer(
+                context.conversation!,
+                context.answerGenerator,
+                getAnswerRequest.query,
+                searchResults.data,
+            );
+            if (response.success) {
+                context.printer.writeAnswer(response.data);
+            }
+        } else {
+            context.printer.writeAnswer(response.data);
         }
     }
 
