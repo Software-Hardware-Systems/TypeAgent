@@ -3,11 +3,7 @@
 
 import { getActiveTab } from "./tabManager";
 import { getTabHTMLFragments, getTabAnnotatedScreenshot } from "./capture";
-import {
-    getRecordedActions,
-    clearRecordedActions,
-    saveRecordedActions,
-} from "./storage";
+import { getRecordedActions, saveRecordedActions } from "./storage";
 import {
     sendActionToAgent,
     ensureWebsocketConnected,
@@ -24,6 +20,65 @@ export async function handleMessage(
     message: any,
     sender: chrome.runtime.MessageSender,
 ): Promise<any> {
+    // Handle action-based messages (from websiteLibraryPanel)
+    if (message.action) {
+        switch (message.action) {
+            case "checkWebSocketConnection": {
+                try {
+                    const websocket = getWebSocket();
+                    return {
+                        connected:
+                            websocket &&
+                            websocket.readyState === WebSocket.OPEN,
+                    };
+                } catch (error) {
+                    return { connected: false };
+                }
+            }
+
+            case "getLibraryStats": {
+                return await handleGetWebsiteLibraryStats();
+            }
+
+            case "searchWebsites": {
+                return await handleSearchWebsitesEnhanced(message);
+            }
+
+            case "extractKnowledge": {
+                // TODO: Implement knowledge extraction
+                return {
+                    hasKnowledge: false,
+                    status: "none",
+                    error: "Knowledge extraction not implemented",
+                };
+            }
+
+            case "checkKnowledgeStatus": {
+                // TODO: Implement knowledge status check
+                return {
+                    hasKnowledge: false,
+                    status: "none",
+                };
+            }
+
+            case "getSearchSuggestions": {
+                return await handleGetSearchSuggestions(message);
+            }
+
+            case "getRecentSearches": {
+                return await handleGetSearchHistory();
+            }
+
+            case "saveSearch": {
+                return await handleSaveSearchHistory({
+                    query: message.query,
+                    results: message.results,
+                });
+            }
+        }
+    }
+
+    // Handle type-based messages (existing code)
     switch (message.type) {
         case "initialize": {
             console.log("Browser Agent Service Worker started");
@@ -39,7 +94,8 @@ export async function handleMessage(
             return "Service worker initialize called";
         }
         case "refreshSchema": {
-            const schemaResult = await sendActionToAgent({
+            // Discovery now auto-saves actions
+            const discoveryResult = await sendActionToAgent({
                 actionName: "detectPageActions",
                 parameters: {
                     registerAgent: false,
@@ -47,21 +103,50 @@ export async function handleMessage(
             });
 
             return {
-                schema: schemaResult.schema,
-                actionDefinitions: schemaResult.typeDefinitions,
+                schema: discoveryResult.schema,
+                actionDefinitions: discoveryResult.typeDefinitions,
             };
         }
         case "registerTempSchema": {
+            // First try to get actions from ActionsStore for enhanced schema registration
+            try {
+                const currentTab = await getActiveTab();
+                if (currentTab?.url) {
+                    const actionsResult = await sendActionToAgent({
+                        actionName: "getActionsForUrl",
+                        parameters: {
+                            url: currentTab.url,
+                            includeGlobal: true,
+                        },
+                    });
+
+                    if (
+                        actionsResult.actions &&
+                        actionsResult.actions.length > 0
+                    ) {
+                        console.log(
+                            `Found ${actionsResult.actions.length} actions for schema registration from ActionsStore`,
+                        );
+                    }
+                }
+            } catch (error) {
+                console.warn(
+                    "Failed to get actions from ActionsStore for schema registration:",
+                    error,
+                );
+            }
+
+            // Register the dynamic agent schema
             const schemaResult = await sendActionToAgent({
                 actionName: "registerPageDynamicAgent",
                 parameters: {
                     agentName: message.agentName,
                 },
             });
-
             return { schema: schemaResult };
         }
         case "getIntentFromRecording": {
+            // Authoring now auto-saves actions
             const schemaResult = await sendActionToAgent({
                 actionName: "getIntentFromRecording",
                 parameters: {
@@ -79,7 +164,19 @@ export async function handleMessage(
                 intentJson: schemaResult.intentJson,
                 actions: schemaResult.actions,
                 intentTypeDefinition: schemaResult.intentTypeDefinition,
+                actionId: schemaResult.actionId, // For UI feedback
             };
+        }
+        case "getActionsForUrl": {
+            const result = await sendActionToAgent({
+                actionName: "getActionsForUrl",
+                parameters: {
+                    url: message.url,
+                    includeGlobal: message.includeGlobal ?? true,
+                    author: message.author,
+                },
+            });
+            return result;
         }
         case "startRecording": {
             const targetTab = await getActiveTab();
@@ -146,14 +243,6 @@ export async function handleMessage(
         case "getRecordedActions": {
             const result = await getRecordedActions();
             return result;
-        }
-        case "clearRecordedActions": {
-            try {
-                await clearRecordedActions();
-            } catch (error) {
-                console.error("Error clearing storage data:", error);
-            }
-            return {};
         }
         case "downloadData": {
             const jsonString = JSON.stringify(message.data, null, 2);
@@ -433,14 +522,14 @@ export async function handleMessage(
                 if (panel === "schema") {
                     await chrome.sidePanel.setOptions({
                         tabId: tabId,
-                        path: "sidepanel.html",
+                        path: "views/pageActions.html",
                         enabled: true,
                     });
                     await chrome.sidePanel.open({ tabId });
                 } else if (panel === "knowledge") {
                     await chrome.sidePanel.setOptions({
                         tabId: tabId,
-                        path: "knowledgePanel.html",
+                        path: "views/pageKnowledge.html",
                         enabled: true,
                     });
                     await chrome.sidePanel.open({ tabId });
@@ -504,6 +593,19 @@ export async function handleMessage(
             return await handleCancelImport(message.importId);
         }
 
+        // HTML Folder Import message handlers
+        case "importHtmlFolder": {
+            return await handleImportHtmlFolder(message);
+        }
+
+        case "getFileImportProgress": {
+            return await handleGetFileImportProgress(message.importId);
+        }
+
+        case "cancelFileImport": {
+            return await handleCancelFileImport(message.importId);
+        }
+
         // Enhanced search message handlers
         case "searchWebsitesEnhanced": {
             return await handleSearchWebsitesEnhanced(message);
@@ -540,6 +642,122 @@ export async function handleMessage(
 
         case "deleteKnowledgeIndex": {
             return await handleDeleteKnowledgeIndex();
+        }
+
+        case "recordActionUsage": {
+            // New handler for tracking action usage
+            try {
+                // This would be implemented when we add usage tracking to the discovery agent
+                console.log(`Recording usage for action: ${message.actionId}`);
+                return { success: true };
+            } catch (error) {
+                console.warn("Failed to record action usage:", error);
+                return {
+                    success: false,
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error",
+                };
+            }
+        }
+
+        case "getActionStatistics": {
+            // New handler for getting action statistics
+            try {
+                const result = await sendActionToAgent({
+                    actionName: "getActionsForUrl",
+                    parameters: {
+                        url: message.url || (await getActiveTab())?.url,
+                        includeGlobal: true,
+                    },
+                });
+
+                return {
+                    success: true,
+                    totalActions: result.count || 0,
+                    actions: result.actions || [],
+                };
+            } catch (error) {
+                console.warn("Failed to get action statistics:", error);
+                return {
+                    success: false,
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error",
+                };
+            }
+        }
+
+        case "deleteAction": {
+            // Handler for deleting actions from the ActionsStore
+            try {
+                const result = await sendActionToAgent({
+                    actionName: "deleteAction",
+                    parameters: {
+                        actionId: message.actionId,
+                    },
+                });
+                return result;
+            } catch (error) {
+                console.error("Failed to delete action:", error);
+                return {
+                    success: false,
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error",
+                };
+            }
+        }
+        case "getAllActions": {
+            try {
+                const result = await sendActionToAgent({
+                    actionName: "getActionsForUrl",
+                    parameters: {
+                        url: null,
+                        includeGlobal: true,
+                    },
+                });
+
+                return { actions: result.actions || [] };
+            } catch (error) {
+                console.error("Error getting all actions:", error);
+                return { actions: [] };
+            }
+        }
+        case "getActionDomains": {
+            try {
+                const result = await sendActionToAgent({
+                    actionName: "getActionDomains",
+                    parameters: {},
+                });
+
+                return { domains: result.domains || [] };
+            } catch (error) {
+                console.error("Error getting action domains:", error);
+                return { domains: [] };
+            }
+        }
+        case "deleteAction": {
+            try {
+                const result = await sendActionToAgent({
+                    actionName: "deleteAction",
+                    parameters: {
+                        actionId: message.actionId,
+                    },
+                });
+
+                return { success: result.success, error: result.error };
+            } catch (error) {
+                console.error("Error deleting action:", error);
+                return {
+                    success: false,
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                };
+            }
         }
 
         default:
@@ -680,6 +898,111 @@ async function handleCancelImport(importId: string) {
         return { success: true };
     } catch (error) {
         console.error("Error cancelling import:", error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+        };
+    }
+}
+
+// HTML Folder Import handlers
+async function handleImportHtmlFolder(message: any) {
+    try {
+        const { parameters } = message;
+        const { folderPath, options, importId } = parameters;
+
+        // Send action to backend agent using the new ImportHtmlFolder action
+        const result = await sendActionToAgent({
+            actionName: "importHtmlFolder",
+            parameters: {
+                folderPath,
+                options: {
+                    extractContent: options?.extractContent ?? true,
+                    enableIntelligentAnalysis:
+                        options?.enableIntelligentAnalysis ?? true,
+                    enableActionDetection:
+                        options?.enableActionDetection ?? false,
+                    extractionMode: options?.extractionMode ?? "content",
+                    preserveStructure: options?.preserveStructure ?? true,
+                    recursive: options?.recursive ?? true,
+                    fileTypes: options?.fileTypes ?? [
+                        ".html",
+                        ".htm",
+                        ".mhtml",
+                    ],
+                    limit: options?.limit,
+                    maxFileSize: options?.maxFileSize,
+                    skipHidden: options?.skipHidden ?? true,
+                },
+                importId,
+            },
+        });
+
+        return {
+            success: !result.error,
+            itemCount: result.websiteCount || 0,
+            importId: importId,
+            duration: result.duration || 0,
+            errors: result.errors || [],
+            summary: {
+                totalProcessed: result.websiteCount || 0,
+                successfullyImported: result.websiteCount || 0,
+                knowledgeExtracted: result.knowledgeCount || 0,
+                entitiesFound: result.entityCount || 0,
+                topicsIdentified: result.topicCount || 0,
+                actionsDetected: result.actionCount || 0,
+            },
+        };
+    } catch (error) {
+        console.error("Folder import error:", error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+            importId: message.parameters?.importId || "unknown",
+            itemCount: 0,
+            errors: [(error as Error).message],
+            summary: {
+                totalProcessed: 0,
+                successfullyImported: 0,
+                knowledgeExtracted: 0,
+                entitiesFound: 0,
+                topicsIdentified: 0,
+                actionsDetected: 0,
+            },
+        };
+    }
+}
+
+async function handleGetFileImportProgress(importId: string) {
+    try {
+        // For now, return a basic progress response
+        // In a full implementation, this would track actual import progress
+        return {
+            success: true,
+            progress: {
+                importId: importId,
+                phase: "complete",
+                totalItems: 0,
+                processedItems: 0,
+                errors: [],
+            },
+        };
+    } catch (error) {
+        console.error("Error getting file import progress:", error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+        };
+    }
+}
+
+async function handleCancelFileImport(importId: string) {
+    try {
+        // Implementation would depend on how file imports are tracked
+        // For now, just return success
+        return { success: true };
+    } catch (error) {
+        console.error("Error cancelling file import:", error);
         return {
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",

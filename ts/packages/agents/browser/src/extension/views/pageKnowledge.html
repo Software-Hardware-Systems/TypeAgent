@@ -6,7 +6,7 @@
   <head>
     <meta charset="utf-8" />
     <title>TypeAgent Knowledge Panel</title>
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="../vendor/bootstrap/bootstrap.min.css" />
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css"
       rel="stylesheet"
@@ -17,10 +17,12 @@
         background-color: #f8f9fa;
       }
       .knowledge-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        background: white;
+        color: #333;
         padding: 1rem;
         margin: -0.5rem -0.5rem 1rem -0.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-bottom: 1px solid #e9ecef;
       }
       .status-indicator {
         width: 8px;
@@ -198,7 +200,7 @@
                 type="checkbox"
                 id="autoIndexToggle"
               />
-              <label class="form-check-label text-white" for="autoIndexToggle">
+              <label class="form-check-label text-muted" for="autoIndexToggle">
                 Auto-index
               </label>
             </div>
@@ -352,7 +354,7 @@
       </div>
     </div>
 
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
-    <script src="knowledgePanel.js"></script>
+    <script src="../vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="pageKnowledge.js"></script>
   </body>
 </html>

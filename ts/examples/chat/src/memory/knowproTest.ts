@@ -9,6 +9,7 @@ import {
     CommandMetadata,
     parseNamedArguments,
     parseTypedArguments,
+    ProgressBar,
 } from "interactive-app";
 import { KnowproContext } from "./knowproMemory.js";
 import { argDestFile, argSourceFile } from "../common.js";
@@ -17,15 +18,23 @@ import * as kpTest from "knowpro-test";
 import * as cm from "conversation-memory";
 import {
     changeFileExt,
+    ensureDir,
     getAbsolutePath,
+    getFileName,
     htmlToMd,
     readAllText,
     simplifyHtml,
     simplifyText,
+    writeJsonFile,
 } from "typeagent";
 import chalk from "chalk";
 import { openai } from "aiclient";
 import * as fs from "fs";
+import {
+    createIndexingEventHandler,
+    sourcePathToMemoryIndexPath,
+} from "./knowproCommon.js";
+import path from "path";
 
 /**
  * Test related commands
@@ -92,6 +101,8 @@ export async function createKnowproTestCommands(
             },
             options: {
                 rootTag: arg("Root tag", "body"),
+                buildIndex: argBool("Build doc index", false),
+                maxParts: argNum("Max parts to index"),
             },
         };
     }
@@ -103,11 +114,41 @@ export async function createKnowproTestCommands(
             return;
         }
         let html = await readAllText(filePath);
-        let parts = cm.docPartsFromHtmlEx(html, namedArgs.rootTag);
-        for (const part of parts) {
+        let docParts = cm.docPartsFromHtmlEx(html, namedArgs.rootTag);
+        for (const part of docParts) {
             context.printer.writeLine("----------------");
             context.printer.writeDocPart(part);
         }
+        const maxParts = Math.min(
+            docParts.length,
+            namedArgs.maxParts ?? Number.MAX_SAFE_INTEGER,
+        );
+        if (maxParts < docParts.length) {
+            docParts = docParts.slice(0, maxParts);
+        }
+        if (!namedArgs.buildIndex) {
+            return;
+        }
+        context.printer.writeLine(`Indexing ${maxParts} document parts`);
+        const docMemory = new cm.DocMemory("", docParts);
+        docMemory.settings.conversationSettings.semanticRefIndexSettings.autoExtractKnowledge =
+            false;
+        const progress = new ProgressBar(context.printer, maxParts);
+        const eventHandler = createIndexingEventHandler(
+            context.printer,
+            progress,
+            maxParts,
+        );
+        const indexingResults = await docMemory.buildIndex(eventHandler);
+        context.printer.writeIndexingResults(indexingResults);
+        const savePath = sourcePathToMemoryIndexPath(namedArgs.filePath);
+        // Save the index
+        await docMemory.writeToFile(
+            path.dirname(savePath),
+            getFileName(savePath),
+        );
+
+        context.conversation = docMemory;
     }
 
     function searchBatchDef(): CommandMetadata {
@@ -164,8 +205,6 @@ export async function createKnowproTestCommands(
                 srcPath: argSourceFile(),
             },
             options: {
-                startAt: argNum("Start at this query", 0),
-                count: argNum("Number to run"),
                 verbose: argBool("Verbose error output", false),
             },
         };
@@ -180,16 +219,13 @@ export async function createKnowproTestCommands(
 
             const namedArgs = parseNamedArguments(args, verifySearchBatchDef());
             const srcPath = namedArgs.srcPath;
-            let errorCount = 0;
             const results = await kpTest.verifyLangSearchResultsBatch(
                 context,
                 srcPath,
                 (result, index, total) => {
                     context.printer.writeProgress(index + 1, total);
                     if (result.success) {
-                        if (!writeSearchScore(result.data, namedArgs.verbose)) {
-                            errorCount++;
-                        }
+                        writeSearchScore(result.data, namedArgs.verbose);
                     } else {
                         context.printer.writeError(result.message);
                     }
@@ -197,10 +233,9 @@ export async function createKnowproTestCommands(
             );
             if (!results.success) {
                 context.printer.writeError(results.message);
+                return;
             }
-            if (errorCount > 0) {
-                context.printer.writeLine(`${errorCount} errors`);
-            }
+            await writeSearchValidationReport(results.data, srcPath);
         } finally {
             endTestBatch();
         }
@@ -403,20 +438,31 @@ export async function createKnowproTestCommands(
     ): boolean {
         const error = result.error;
         if (error !== undefined && error.length > 0) {
-            context.printer.writeInColor(
-                chalk.redBright,
-                `[${error}]: ${result.expected.cmd!}`,
+            context.printer.writeLineInColor(
+                chalk.gray,
+                result.actual.searchText,
             );
-            context.printer.writeInColor(chalk.red, `Error: ${error}`);
+            context.printer.writeInColor(chalk.red, `${result.expected.cmd!}`);
+            context.printer.writeInColor(chalk.red, `Error:\n ${error}`);
             if (verbose) {
+                context.printer.writeLine("===========");
+                context.printer.writeJsonInColor(
+                    chalk.red,
+                    result.actual.searchQueryExpr,
+                );
                 context.printer.writeJsonInColor(
                     chalk.red,
                     result.actual.results,
                 );
                 context.printer.writeJsonInColor(
                     chalk.green,
+                    result.expected.searchQueryExpr,
+                );
+                context.printer.writeJsonInColor(
+                    chalk.green,
                     result.expected.results,
                 );
+                context.printer.writeLine("===========");
             }
             return false;
         } else {
@@ -425,6 +471,25 @@ export async function createKnowproTestCommands(
                 result.actual.searchText,
             );
             return true;
+        }
+    }
+
+    async function writeSearchValidationReport(
+        results: kpTest.Comparison<kpTest.LangSearchResults>[],
+        srcPath?: string,
+    ) {
+        const errorResults = results.filter(
+            (c) => c.error !== undefined && c.error.length > 0,
+        );
+        if (errorResults.length === 0) {
+            context.printer.writeLineInColor(chalk.green, "No errors");
+            return;
+        }
+
+        context.printer.writeLine(`${errorResults.length} errors`);
+        context.printer.writeList(errorResults.map((e) => e.expected.cmd));
+        if (srcPath) {
+            await saveReport(srcPath, errorResults);
         }
     }
 
@@ -447,6 +512,13 @@ export async function createKnowproTestCommands(
             context.printer.writeJsonInColor(chalk.redBright, result.actual);
             context.printer.writeJsonInColor(chalk.green, result.expected);
         }
+    }
+
+    async function saveReport(srcPath: string, report: any) {
+        const outputDir = path.join(context.basePath, "logs/testReports");
+        await ensureDir(outputDir);
+        const outputPath = path.join(outputDir, getFileName(srcPath) + ".json");
+        await writeJsonFile(outputPath, report);
     }
 
     function beginTestBatch() {

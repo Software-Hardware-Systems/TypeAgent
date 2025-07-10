@@ -7,8 +7,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Action Discovery Panel</title>
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
-    <link rel="stylesheet" href="vendor/prism/prism.css" />
+    <link rel="stylesheet" href="../vendor/bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="../vendor/prism/prism.css" />
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css"
@@ -25,13 +25,15 @@
         padding: 0.75rem;
       }
 
-      /* Header styling aligned with knowledge panel */
+      /* Header styling */
       .action-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        background: white;
+        color: #333;
         padding: 1rem;
         margin: -0.75rem -0.75rem 1rem -0.75rem;
         border-radius: 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-bottom: 1px solid #e9ecef;
       }
 
       .status-indicator {
@@ -248,7 +250,7 @@
                 id="autoDiscoveryToggle"
               />
               <label
-                class="form-check-label text-white"
+                class="form-check-label text-muted"
                 for="autoDiscoveryToggle"
               >
                 Auto-scan
@@ -274,7 +276,7 @@
             class="btn btn-primary btn-sm"
             title="Refresh detected actions"
           >
-            <i class="bi bi-arrow-clockwise"></i> Scan
+            <i class="bi bi-arrow-clockwise"></i>
           </button>
         </div>
         <div class="card-body">
@@ -331,88 +333,6 @@
         </div>
       </div>
 
-      <!-- Action Form (Hidden by default) -->
-      <div id="actionForm" class="d-none">
-        <div class="action-card card">
-          <div class="card-header">
-            <h6 class="mb-0">
-              <i class="bi bi-gear"></i>
-              <span id="formTitle">Create New Action</span>
-            </h6>
-          </div>
-          <div class="card-body action-form">
-            <div class="mb-3">
-              <label class="form-label fw-semibold">Action Name</label>
-              <input
-                type="text"
-                id="actionName"
-                class="form-control"
-                placeholder="Enter a descriptive name for this action"
-                required
-              />
-            </div>
-
-            <div class="mb-3">
-              <label class="form-label fw-semibold">Action Description</label>
-              <textarea
-                id="actionStepsDescription"
-                class="form-control"
-                rows="4"
-                placeholder="Describe how to complete this action step by step..."
-              ></textarea>
-            </div>
-
-            <div id="recordingSection" class="mb-3">
-              <label class="form-label fw-semibold">Record Steps</label>
-              <div class="d-flex action-controls align-items-center">
-                <button
-                  id="recordAction"
-                  class="btn btn-outline-danger"
-                  title="Start recording action steps"
-                >
-                  <i class="bi bi-record-circle"></i> Start Recording
-                </button>
-                <button
-                  id="stopRecording"
-                  class="btn btn-danger d-none"
-                  title="Stop recording"
-                >
-                  <i class="bi bi-stop-circle"></i> Stop Recording
-                </button>
-                <div id="recordingStatus" class="ms-3 text-muted d-none">
-                  <span class="status-indicator status-recording"></span>
-                  Recording in progress...
-                </div>
-              </div>
-            </div>
-
-            <div id="stepsTimelineContainer" class="mb-3 d-none">
-              <label class="form-label fw-semibold">Recorded Steps</label>
-              <div id="stepsTimeline" class="border rounded p-3 bg-white">
-                <!-- Timeline items will be populated here -->
-              </div>
-            </div>
-
-            <div class="d-flex action-controls justify-content-end">
-              <button
-                id="cancelAddingAction"
-                class="btn btn-outline-secondary"
-                title="Cancel and close form"
-              >
-                <i class="bi bi-x-circle"></i> Cancel
-              </button>
-              <button
-                id="saveAction"
-                class="btn btn-primary"
-                title="Save this action"
-              >
-                <i class="bi bi-floppy"></i> Save Action
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Screenshot Container (Hidden by default) -->
       <div id="screenshotContainer" class="d-none">
         <div class="action-card card">
@@ -429,10 +349,10 @@
     </div>
 
     <!-- Scripts -->
-    <script src="sidepanel.js"></script>
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
-    <script src="vendor/prism/prism.js"></script>
-    <script src="vendor/prism/prism-typescript.js"></script>
-    <script src="vendor/prism/prism-json.js"></script>
+    <script src="pageActions.js"></script>
+    <script src="../vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="../vendor/prism/prism.js"></script>
+    <script src="../vendor/prism/prism-typescript.js"></script>
+    <script src="../vendor/prism/prism-json.js"></script>
   </body>
 </html>
